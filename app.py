@@ -1,138 +1,121 @@
-# ===========================================
-# 📚 AI Perangkum PDF – Versi dengan Fallback Model
-# ===========================================
-
 import streamlit as st
-import PyPDF2
-from openai import OpenAI
-import os
+import sys
+import subprocess
 
-# ==========================
-# 🔑 Konfigurasi API Key
-# ==========================
-# ⚠️ Jangan taruh API key langsung di sini untuk keamanan.
-# Gunakan menu "Secrets" di Streamlit Cloud atau file .env lokal.
-# Contoh: st.secrets["OPENAI_API_KEY"]
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", "")
+# ==============================================================
+# ✅ BAGIAN 1: Fungsi bantu untuk instalasi otomatis
+# ==============================================================
 
-if not OPENAI_API_KEY:
-    st.error("❌ API Key belum diatur. Tambahkan OPENAI_API_KEY di secrets atau environment variable.")
-    st.stop()
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-
-# ==========================
-# 🧠 Fungsi: Ekstrak teks dari PDF
-# ==========================
-def extract_text_from_pdf(pdf_file):
+def install_package(package):
+    """Instal paket Python secara otomatis jika belum tersedia."""
     try:
-        reader = PyPDF2.PdfReader(pdf_file)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
     except Exception as e:
-        st.error(f"❌ Gagal membaca PDF: {e}")
-        return ""
+        st.error(f"Gagal menginstal paket {package}: {e}")
 
-# ==========================
-# ✂️ Fungsi: Bagi teks jadi potongan kecil
-# ==========================
-def split_text(text, chunk_size=2000):
-    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+# ==============================================================
+# ✅ BAGIAN 2: Pastikan dependensi utama tersedia
+# ==============================================================
 
-# ==========================
-# 🧾 Fungsi: Ringkas teks dengan fallback model
-# ==========================
-def summarize_text(text_chunk):
-    system_prompt = "Kamu adalah asisten AI yang ahli dalam meringkas teks panjang menjadi poin-poin penting dan mudah dipahami."
+# Pastikan PyPDF2 ada
+try:
+    import PyPDF2
+except ModuleNotFoundError:
+    st.warning("📦 Modul PyPDF2 belum terinstal. Menginstal otomatis...")
+    install_package("PyPDF2")
+    import PyPDF2
 
+# Pastikan scikit-learn ada
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+except ModuleNotFoundError:
+    st.warning("📦 Modul scikit-learn belum terinstal. Menginstal otomatis...")
+    install_package("scikit-learn")
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+# Pastikan transformers ada (untuk analisis teks opsional)
+try:
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ModuleNotFoundError:
+    st.warning("📦 Modul transformers belum terinstal. Menginstal otomatis...")
+    install_package("transformers")
     try:
-        # Model utama (lebih kuat)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Ringkas teks berikut menjadi poin-poin utama:\n\n{text_chunk}"}
-            ],
-            temperature=0.3
-        )
-        return response.choices[0].message.content.strip()
+        from transformers import pipeline
+        TRANSFORMERS_AVAILABLE = True
+    except Exception:
+        st.warning("❌ Modul transformers gagal dimuat. Akan menggunakan model fallback sederhana.")
+        TRANSFORMERS_AVAILABLE = False
 
-    except Exception as e:
-        err = str(e)
+# ==============================================================
+# ✅ BAGIAN 3: Konfigurasi Streamlit
+# ==============================================================
 
-        # 🧩 Tangani kuota habis
-        if "insufficient_quota" in err or "You exceeded your current quota" in err:
-            st.warning("⚠️ Kuota API model utama (GPT-4o-mini) habis. Beralih ke model cadangan (GPT-3.5-turbo)...")
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": f"Ringkas teks berikut menjadi poin-poin utama:\n\n{text_chunk}"}
-                    ],
-                    temperature=0.3
-                )
-                return response.choices[0].message.content.strip()
-            except Exception as inner_e:
-                return f"⚠️ Gagal juga dengan model cadangan: {inner_e}"
+st.set_page_config(page_title="Litearn - PDF Text Analyzer", layout="wide")
+st.title("📘 Litearn - PDF Text Analyzer")
+st.write("Unggah file PDF Anda untuk diekstrak dan dianalisis teksnya secara otomatis.")
 
-        # 🧩 Tangani API key salah
-        elif "invalid_api_key" in err or "Incorrect API key" in err:
-            return "❌ API Key salah atau tidak aktif. Periksa pengaturan di https://platform.openai.com/account/api-keys"
+# ==============================================================
+# ✅ BAGIAN 4: Upload PDF dan ekstraksi teks
+# ==============================================================
 
-        # 🧩 Tangani error lainnya
-        else:
-            return f"⚠️ Terjadi kesalahan saat meringkas: {err}"
-
-# ==========================
-# 🖥️ Tampilan Streamlit
-# ==========================
-st.set_page_config(page_title="AI Perangkum PDF", page_icon="📘", layout="wide")
-st.title("📚 AI Perangkum Buku / PDF")
-st.write("Unggah file PDF kamu, dan biarkan AI meringkas isinya secara otomatis ✨")
-
-uploaded_file = st.file_uploader("Unggah file PDF", type=["pdf"])
+uploaded_file = st.file_uploader("📂 Unggah file PDF", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("📖 Membaca isi PDF..."):
-        text = extract_text_from_pdf(uploaded_file)
+    try:
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() or ""
 
-    if not text.strip():
-        st.error("❌ Tidak dapat mengekstrak teks dari file PDF.")
-        st.stop()
-
-    st.success(f"✅ PDF berhasil dibaca. Panjang teks: {len(text)} karakter.")
-
-    if len(text) < 500:
-        st.warning("⚠️ Teks terlalu pendek untuk diringkas.")
-    else:
-        chunks = split_text(text)
-        st.info(f"🔍 PDF dibagi menjadi {len(chunks)} bagian agar bisa diproses dengan aman.")
-
-        summaries = []
-        progress = st.progress(0)
-
-        for i, chunk in enumerate(chunks):
-            summary = summarize_text(chunk)
-            summaries.append(summary)
-            progress.progress((i + 1) / len(chunks))
-
-        final_summary = "\n\n".join(summaries)
-
-        st.subheader("📘 Ringkasan Akhir")
-        st.write(final_summary)
-
-        st.download_button(
-            label="💾 Unduh Ringkasan (TXT)",
-            data=final_summary,
-            file_name="ringkasan_ai.txt",
-            mime="text/plain"
-        )
-
-        st.success("🎉 Ringkasan selesai dibuat!")
+        if text.strip():
+            st.success("✅ Berhasil mengekstrak teks dari PDF!")
+            st.text_area("📄 Isi PDF:", text, height=300)
+        else:
+            st.warning("⚠️ Tidak ada teks yang dapat diekstrak dari PDF ini.")
+    except Exception as e:
+        st.error(f"Gagal membaca file PDF: {e}")
 else:
     st.info("Silakan unggah file PDF terlebih dahulu.")
+
+# ==============================================================
+# ✅ BAGIAN 5: Analisis teks (opsional)
+# ==============================================================
+
+st.subheader("🔍 Analisis Teks (Opsional)")
+
+if st.button("Analisis Sentimen"):
+    if uploaded_file is None:
+        st.warning("⚠️ Harap unggah PDF terlebih dahulu.")
+    elif len(text.strip()) < 10:
+        st.warning("⚠️ Tidak cukup teks untuk dianalisis.")
+    else:
+        try:
+            if TRANSFORMERS_AVAILABLE:
+                st.info("🔄 Menggunakan model Hugging Face untuk analisis sentimen...")
+                classifier = pipeline("sentiment-analysis")
+                result = classifier(text[:512])[0]
+                st.success(f"**Label:** {result['label']} | **Skor:** {result['score']:.2f}")
+            else:
+                st.info("🧠 Menggunakan model fallback sederhana (rule-based).")
+                positive_words = ["good", "great", "happy", "excellent", "positive", "love"]
+                negative_words = ["bad", "sad", "terrible", "poor", "hate", "negative"]
+
+                pos_count = sum(word in text.lower() for word in positive_words)
+                neg_count = sum(word in text.lower() for word in negative_words)
+
+                if pos_count > neg_count:
+                    st.success(f"Label: POSITIVE | Rasio: {pos_count}:{neg_count}")
+                elif neg_count > pos_count:
+                    st.error(f"Label: NEGATIVE | Rasio: {pos_count}:{neg_count}")
+                else:
+                    st.warning("Label: NEUTRAL | Tidak dominan positif atau negatif.")
+        except Exception as e:
+            st.error(f"❌ Gagal melakukan analisis teks: {e}")
+
+# ==============================================================
+# ✅ BAGIAN 6: Footer
+# ==============================================================
+
+st.markdown("---")
+st.caption("Dibuat dengan ❤️ menggunakan Streamlit | © 2025 Litearn")
