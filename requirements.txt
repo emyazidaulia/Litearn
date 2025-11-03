@@ -1,3 +1,5 @@
 streamlit
-pypdf
+PyPDF2
+transformers
+scikit-learn
 openai
