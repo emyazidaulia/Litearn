@@ -1,37 +1,56 @@
 # ===========================================
-# 📚 AI Perangkum PDF – Versi Menengah
-# Dibuat sederhana agar mudah dipahami
+# 📚 AI Perangkum PDF – Versi Aman & Stabil
 # ===========================================
 
 import streamlit as st
-import PyPDF2
-from openai import OpenAI
 import os
 
+# Coba impor pustaka PDF modern (pypdf) lalu fallback ke PyPDF2 jika perlu
+try:
+    from pypdf import PdfReader
+except ImportError:
+    try:
+        from PyPDF2 import PdfReader
+    except ImportError:
+        st.error("❌ Library PDF belum terinstal. Tambahkan 'pypdf' atau 'PyPDF2' ke requirements.txt.")
+        st.stop()
+
+from openai import OpenAI
+
 # ==========================
-# 🔑 MASUKKAN API KEY DI SINI
+# 🔑 PENGATURAN API KEY
 # ==========================
-# Disarankan simpan di file .env untuk keamanan
-os.environ["OPENAI_API_KEY"] = "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"
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Jangan menulis API key langsung di kode.
+# Gunakan Streamlit Secrets atau .env untuk keamanan.
+api_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    st.error("❌ OPENAI_API_KEY belum diset. Tambahkan API key di Streamlit Cloud → Settings → Secrets.")
+    st.stop()
+
+client = OpenAI(api_key=api_key)
 
 # ==========================
 # 🧠 Fungsi: Ekstrak teks dari PDF
 # ==========================
 def extract_text_from_pdf(pdf_file):
-    reader = PyPDF2.PdfReader(pdf_file)
-    text = ""
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text += page_text + "\n"
-    return text
+    try:
+        reader = PdfReader(pdf_file)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        return text
+    except Exception as e:
+        st.error(f"Gagal membaca PDF: {e}")
+        return ""
 
 # ==========================
 # ✂️ Fungsi: Bagi teks jadi potongan kecil
 # ==========================
 def split_text(text, chunk_size=2000):
-    return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 # ==========================
 # 🧾 Fungsi: Ringkas teks dengan GPT
@@ -39,7 +58,7 @@ def split_text(text, chunk_size=2000):
 def summarize_text(text_chunk):
     try:
         response = client.chat.completions.create(
-            model="gpt-4-turbo",  # bisa juga gpt-3.5-turbo jika lebih murah
+            model="gpt-4o-mini",  # cepat & hemat, bisa ganti gpt-4-turbo
             messages=[
                 {"role": "system", "content": "Kamu adalah asisten yang ahli dalam meringkas dokumen panjang."},
                 {"role": "user", "content": f"Ringkas teks berikut menjadi poin-poin utama dengan bahasa mudah:\n\n{text_chunk}"}
@@ -48,7 +67,7 @@ def summarize_text(text_chunk):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        return f"Terjadi kesalahan saat meringkas: {e}"
+        return f"⚠️ Terjadi kesalahan saat meringkas: {e}"
 
 # ==========================
 # 🖥️ Tampilan Streamlit
@@ -62,7 +81,11 @@ uploaded_file = st.file_uploader("Unggah file PDF", type=["pdf"])
 if uploaded_file is not None:
     with st.spinner("📖 Membaca isi PDF..."):
         text = extract_text_from_pdf(uploaded_file)
-    
+
+    if not text:
+        st.warning("Tidak ada teks yang berhasil dibaca dari PDF. Pastikan PDF bukan hasil scan gambar.")
+        st.stop()
+
     st.success(f"✅ PDF berhasil dibaca. Panjang teks: {len(text)} karakter.")
 
     if len(text) < 500:
@@ -77,13 +100,12 @@ if uploaded_file is not None:
             summary = summarize_text(chunk)
             summaries.append(summary)
             progress.progress((i + 1) / len(chunks))
-        
+
         final_summary = "\n\n".join(summaries)
-        
+
         st.subheader("📘 Ringkasan Akhir")
         st.write(final_summary)
 
-        # Tombol download ringkasan
         st.download_button(
             label="💾 Unduh Ringkasan sebagai TXT",
             data=final_summary,
