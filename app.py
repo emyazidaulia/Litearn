@@ -2,7 +2,7 @@ import streamlit as st
 import PyPDF2
 from openai import OpenAI
 
-client = OpenAI(api_key="YOUR_API_KEY")
+client = OpenAI(api_key="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")
 
 st.title("📚 AI Peringkas Buku")
 
