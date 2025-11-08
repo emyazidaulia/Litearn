@@ -121,16 +121,3 @@ if uploaded_file is not None:
                     st.warning("⚠️ Tidak berhasil meringkas teks. Periksa API key atau log.")
 else:
     st.info("Silakan unggah file PDF terlebih dahulu untuk memulai.")
-
-# ============================================================
-# CATATAN & PETUNJUK
-# ============================================================
-st.markdown(
-    """
----
-💡 **Tips:**
-- Pastikan Anda sudah menambahkan API Key Groq di **Streamlit → Settings → Secrets**  
-  Dalam format TOML seperti ini:
-
-```toml
-GROQ_API_KEY = "gsk_XXXXXXXXXXXXXXXXXXXXXXXX"
