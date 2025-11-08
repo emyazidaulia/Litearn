@@ -11,18 +11,22 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", None)
 # ============================================================
 # KONFIGURASI MODEL UTAMA & CADANGAN
 # ============================================================
-PRIMARY_MODEL = "llama-3.1-8b-instant"  # model aktif Groq (ganti jika perlu)
-FALLBACK_MODEL = "mixtral-8x7b"         # fallback jika model utama gagal
+PRIMARY_MODEL = "llama-3.1-8b-instant"  # ganti sesuai model yang tersedia di akun Groq Anda
+FALLBACK_MODEL = "mixtral-8x7b"         # model cadangan jika model utama tidak tersedia
 
 # ============================================================
 # FUNGSI UNTUK MEMBACA PDF
 # ============================================================
 def extract_text_from_pdf(uploaded_file):
-    reader = PyPDF2.PdfReader(uploaded_file)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
-    return text.strip()
+    try:
+        reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() or ""
+        return text.strip()
+    except Exception as e:
+        st.error(f"Gagal mengekstrak teks dari PDF: {e}")
+        return ""
 
 # ============================================================
 # FUNGSI UNTUK MERINGKAS DENGAN GROQ API (dengan fallback model)
@@ -32,44 +36,57 @@ def summarize_with_groq(text, model=PRIMARY_MODEL):
         st.error("GROQ_API_KEY tidak ditemukan. Tambahkan GROQ_API_KEY di Streamlit Secrets.")
         return None
 
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "Kamu adalah asisten AI yang pandai meringkas teks dalam bahasa Indonesia secara singkat dan padat."},
+            {"role": "user", "content": f"Ringkas isi teks berikut secara jelas dan terstruktur:\n\n{text}"}
+        ],
+        "temperature": 0.4,
+        "max_tokens": 1024
+    }
+
     try:
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        data = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "Kamu adalah asisten AI yang pandai meringkas teks dalam bahasa Indonesia secara singkat dan padat."},
-                {"role": "user", "content": f"Ringkas isi teks berikut secara jelas dan terstruktur:\n\n{text}"}
-            ],
-            "temperature": 0.4,
-            "max_tokens": 1024
-        }
-
-        response = requests.post(url, headers=headers, json=data, timeout=60)
-
-        # sukses
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"].strip()
-
-        # jika model dihentikan, coba fallback model
-        elif response.status_code == 400 and "decommissioned" in response.text.lower():
-            st.warning("⚠️ Model utama sudah tidak tersedia. Menggunakan model cadangan...")
-            return summarize_with_groq(text, model=FALLBACK_MODEL)
-        else:
-            # tampilkan pesan error ringkas ke UI
-            st.warning(f"Groq API mengembalikan status {response.status_code}. Cek log untuk detail.")
-            st.error(response.text)
-            return None
-
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
     except requests.exceptions.RequestException as re:
         st.error(f"Gagal memanggil Groq API (network error): {re}")
         return None
-    except Exception as e:
-        st.error(f"Gagal meringkas dengan Groq API: {e}")
+
+    # Berhasil
+    if resp.status_code == 200:
+        try:
+            return resp.json()["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            st.error(f"Gagal membaca respon dari Groq API: {e}")
+            return None
+
+    # Model decommissioned — coba fallback model
+    if resp.status_code == 400 and "decommissioned" in resp.text.lower():
+        st.warning("⚠️ Model utama tidak tersedia/didekomision. Menggunakan model cadangan...")
+        # Jika fallback sama dengan primary, hentikan untuk mencegah loop
+        if model == FALLBACK_MODEL:
+            st.error("Model cadangan juga dipilih sebagai model utama, tidak ada model lain untuk dicoba.")
+            return None
+        return summarize_with_groq(text, model=FALLBACK_MODEL)
+
+    # Jika error terkait API key atau kuota, tampilkan pesan jelas
+    if resp.status_code == 401:
+        st.error("401 Unauthorized — API key tidak valid atau telah dicabut. Periksa GROQ_API_KEY di Streamlit Secrets.")
         return None
+    if resp.status_code == 429:
+        st.error("429 Too Many Requests / Quota exceeded — kuota Groq Anda mungkin habis.")
+        return None
+
+    # Untuk error lain, tampilkan pesan singkat dan log body
+    st.error(f"Groq API mengembalikan error {resp.status_code}.")
+    st.text(resp.text)
+    return None
 
 # ============================================================
 # ANTARMUKA STREAMLIT
@@ -78,7 +95,7 @@ st.set_page_config(page_title="AI Peringkas PDF", page_icon="🧠", layout="cent
 st.title("🧠 AI Peringkas PDF Otomatis")
 st.write("Unggah file PDF dan dapatkan ringkasan cepat menggunakan model AI Groq.")
 
-# upload
+# Upload file
 uploaded_file = st.file_uploader("📄 Unggah file PDF", type=["pdf"])
 
 if uploaded_file is not None:
@@ -102,7 +119,6 @@ if uploaded_file is not None:
                     st.download_button("💾 Unduh Ringkasan", summary, file_name="ringkasan.txt", mime="text/plain")
                 else:
                     st.warning("⚠️ Tidak berhasil meringkas teks. Periksa API key atau log.")
-
 else:
     st.info("Silakan unggah file PDF terlebih dahulu untuk memulai.")
 
