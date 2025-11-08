@@ -8,6 +8,7 @@ import os
 # ==============================================================
 
 def install_package(package):
+    """Instal paket Python jika belum terpasang."""
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
     except Exception as e:
@@ -21,26 +22,26 @@ except ModuleNotFoundError:
     import PyPDF2
 
 try:
-    from openai import OpenAI
+    from groq import Groq
 except ModuleNotFoundError:
-    st.warning("📦 Menginstal openai...")
-    install_package("openai")
-    from openai import OpenAI
+    st.warning("📦 Menginstal Groq SDK...")
+    install_package("groq")
+    from groq import Groq
 
 # ==============================================================
 # ✅ BAGIAN 2: Konfigurasi halaman Streamlit
 # ==============================================================
 
-st.set_page_config(page_title="📄 PDF Summarizer AI", layout="wide")
-st.title("📘 AI PDF Summarizer")
-st.write("Unggah file PDF dan dapatkan ringkasannya secara otomatis menggunakan AI. 🚀")
+st.set_page_config(page_title="📄 PDF Summarizer AI (Groq)", layout="wide")
+st.title("📘 AI PDF Summarizer – Groq Edition")
+st.write("Unggah file PDF dan dapatkan ringkasannya secara otomatis menggunakan **Groq AI** 🚀")
 
 # ==============================================================
 # ✅ BAGIAN 3: Input API key
 # ==============================================================
 
 st.sidebar.header("⚙️ Pengaturan")
-api_key = st.sidebar.text_input("Masukkan OpenAI API Key:", type="password")
+api_key = st.sidebar.text_input("Masukkan Groq API Key:", type="password")
 
 # ==============================================================
 # ✅ BAGIAN 4: Upload dan ekstraksi teks PDF
@@ -75,20 +76,19 @@ if uploaded_file is not None:
 # ==============================================================
 
 def summarize_text(text, api_key=None):
-    """Meringkas teks menggunakan OpenAI API, atau fallback jika gagal."""
+    """Meringkas teks menggunakan Groq API, atau fallback jika gagal."""
     if not text.strip():
         return "Tidak ada teks yang bisa diringkas."
 
-    # Jika tidak ada API key, langsung pakai fallback
     if not api_key:
         return simple_summarizer(text)
 
     try:
-        client = OpenAI(api_key=api_key)
+        client = Groq(api_key=api_key)
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="mixtral-8x7b",  # Model unggulan Groq untuk tugas reasoning dan ringkasan
             messages=[
-                {"role": "system", "content": "Kamu adalah asisten AI yang mahir meringkas dokumen."},
+                {"role": "system", "content": "Kamu adalah asisten AI yang ahli meringkas dokumen panjang."},
                 {"role": "user", "content": f"Ringkas teks berikut dalam bahasa Indonesia:\n\n{text}"}
             ],
             temperature=0.3,
@@ -97,17 +97,17 @@ def summarize_text(text, api_key=None):
         return response.choices[0].message.content.strip()
 
     except Exception as e:
-        st.warning(f"⚠️ Terjadi kesalahan pada API ({e}). Menggunakan model fallback lokal.")
+        st.warning(f"⚠️ Terjadi kesalahan saat memanggil Groq API: {e}")
         return simple_summarizer(text)
 
 def simple_summarizer(text):
-    """Fallback sederhana untuk meringkas teks tanpa AI."""
+    """Fallback sederhana jika AI gagal."""
     sentences = text.split(".")
     if len(sentences) > 5:
         summary = ". ".join(sentences[:5]) + "."
     else:
         summary = text
-    return f"(Fallback) Ringkasan sederhana:\n\n{summary.strip()}"
+    return f"(Fallback Lokal) Ringkasan sederhana:\n\n{summary.strip()}"
 
 # ==============================================================
 # ✅ BAGIAN 6: Tombol Ringkas
@@ -124,9 +124,17 @@ if st.button("🧠 Ringkas PDF"):
         st.subheader("📋 Hasil Ringkasan:")
         st.write(summary)
 
+        # Tombol download hasil ringkasan
+        st.download_button(
+            label="💾 Unduh Ringkasan sebagai TXT",
+            data=summary,
+            file_name="ringkasan_groq.txt",
+            mime="text/plain"
+        )
+
 # ==============================================================
 # ✅ BAGIAN 7: Footer
 # ==============================================================
 
 st.markdown("---")
-st.caption("Dibuat dengan ❤️ menggunakan Streamlit + OpenAI API | 2025")
+st.caption("Dibuat dengan ❤️ menggunakan Streamlit + Groq API | 2025")
