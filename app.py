@@ -113,10 +113,3 @@ if uploaded_file:
 else:
     st.info("Silakan unggah file PDF terlebih dahulu.")
 
-st.markdown(
-"""
----
-💡 **Tips:**
-- Tambahkan API key Groq kamu di **Streamlit → Settings → Secrets**
-```toml
-GROQ_API_KEY = "gsk_XXXXXXXXXXXXXXXXXXXX"
