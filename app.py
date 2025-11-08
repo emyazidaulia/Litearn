@@ -1,124 +1,100 @@
-import streamlit as st
 import os
-import subprocess
-import sys
+import streamlit as st
+import PyPDF2
+import requests
 
-# ==============================================================
-# ✅ BAGIAN 1: Instalasi otomatis paket yang belum ada
-# ==============================================================
+# ============================================================
+# KONFIGURASI API KEY (ambil dari Streamlit Secrets)
+# ============================================================
+GROQ_API_KEY = os.getenv("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY")
 
-def install_package(package):
+# ============================================================
+# KONFIGURASI MODEL UTAMA & CADANGAN
+# ============================================================
+PRIMARY_MODEL = "llama-3.1-8b-instant"  # model aktif Groq
+FALLBACK_MODEL = "mixtral-8x7b"         # fallback jika model utama gagal
+
+# ============================================================
+# FUNGSI UNTUK MEMBACA PDF
+# ============================================================
+def extract_text_from_pdf(uploaded_file):
+    reader = PyPDF2.PdfReader(uploaded_file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+    return text.strip()
+
+# ============================================================
+# FUNGSI UNTUK MERINGKAS DENGAN GROQ API
+# ============================================================
+def summarize_with_groq(text, model=PRIMARY_MODEL):
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-    except Exception as e:
-        st.error(f"Gagal menginstal paket {package}: {e}")
-
-try:
-    import PyPDF2
-except ModuleNotFoundError:
-    st.warning("📦 Menginstal PyPDF2...")
-    install_package("PyPDF2")
-    import PyPDF2
-
-try:
-    from groq import Groq
-except ModuleNotFoundError:
-    st.warning("📦 Menginstal groq SDK...")
-    install_package("groq")
-    from groq import Groq
-
-
-# ==============================================================
-# ✅ BAGIAN 2: Konfigurasi halaman Streamlit
-# ==============================================================
-
-st.set_page_config(page_title="📄 AI PDF Summarizer (Groq)", layout="wide")
-st.title("📘 AI PDF Summarizer - Groq Model")
-st.write("Unggah file PDF dan dapatkan ringkasannya secara otomatis menggunakan AI dari **Groq** 🚀")
-
-# ==============================================================
-# ✅ BAGIAN 3: Ambil API Key dari Streamlit Secrets
-# ==============================================================
-
-if "GROQ_API_KEY" in st.secrets:
-    api_key = st.secrets["GROQ_API_KEY"]
-else:
-    st.error("❌ API Key tidak ditemukan. Pastikan kamu sudah menambahkan `GROQ_API_KEY` di Secrets.")
-    st.stop()
-
-# ==============================================================
-# ✅ BAGIAN 4: Upload dan ekstraksi teks PDF
-# ==============================================================
-
-uploaded_file = st.file_uploader("📂 Unggah file PDF", type=["pdf"])
-
-def extract_text_from_pdf(file):
-    """Ekstrak teks dari file PDF."""
-    try:
-        reader = PyPDF2.PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        return text
-    except Exception as e:
-        st.error(f"Gagal membaca PDF: {e}")
-        return ""
-
-text = ""
-if uploaded_file is not None:
-    text = extract_text_from_pdf(uploaded_file)
-    if text.strip():
-        st.success("✅ Berhasil mengekstrak teks dari PDF!")
-        with st.expander("📖 Lihat isi PDF"):
-            st.text_area("Isi Teks PDF:", text, height=300)
-    else:
-        st.warning("⚠️ Tidak ditemukan teks dalam PDF ini.")
-
-# ==============================================================
-# ✅ BAGIAN 5: Fungsi Peringkasan dengan Groq
-# ==============================================================
-
-def summarize_with_groq(text, api_key):
-    """Meringkas teks menggunakan API Groq."""
-    try:
-        client = Groq(api_key=api_key)
-
-        completion = client.chat.completions.create(
-            model="llama3-8b-8192",  # model cepat dari Groq
-            messages=[
-                {"role": "system", "content": "Kamu adalah asisten AI yang ahli dalam meringkas dokumen panjang."},
-                {"role": "user", "content": f"Ringkas teks berikut dalam bahasa Indonesia:\n\n{text}"}
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "Kamu adalah asisten AI yang pandai meringkas teks dalam bahasa Indonesia secara singkat dan padat."},
+                {"role": "user", "content": f"Ringkas isi teks berikut secara jelas dan terstruktur:\n\n{text}"}
             ],
-            temperature=0.3,
-            max_tokens=500
-        )
-        return completion.choices[0].message.content.strip()
+            "temperature": 0.4,
+            "max_tokens": 1024
+        }
+
+        response = requests.post(url, headers=headers, json=data, timeout=60)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"].strip()
+
+        # fallback otomatis jika model utama gagal
+        elif response.status_code == 400 and "decommissioned" in response.text.lower():
+            st.warning("⚠️ Model utama sudah tidak tersedia. Menggunakan model cadangan...")
+            return summarize_with_groq(text, model=FALLBACK_MODEL)
+        else:
+            raise Exception(f"Error {response.status_code}: {response.text}")
 
     except Exception as e:
-        st.error(f"❌ Gagal meringkas dengan Groq API: {e}")
+        st.error(f"Gagal meringkas dengan Groq API: {e}")
         return None
 
-# ==============================================================
-# ✅ BAGIAN 6: Tombol Ringkas
-# ==============================================================
+# ============================================================
+# ANTARMUKA STREAMLIT
+# ============================================================
+st.set_page_config(page_title="AI Peringkas PDF", page_icon="🧠", layout="centered")
+st.title("🧠 AI Peringkas PDF Otomatis")
+st.write("Unggah file PDF dan dapatkan ringkasan cepat menggunakan model AI Groq.")
 
-if st.button("🧠 Ringkas PDF"):
-    if not uploaded_file:
-        st.warning("⚠️ Harap unggah file PDF terlebih dahulu.")
-    elif not text.strip():
-        st.warning("⚠️ Tidak ada teks yang bisa diringkas.")
-    else:
-        with st.spinner("⏳ AI Groq sedang meringkas isi PDF..."):
-            summary = summarize_with_groq(text, api_key)
-        if summary:
-            st.subheader("📋 Hasil Ringkasan:")
-            st.write(summary)
+uploaded_file = st.file_uploader("📄 Unggah file PDF", type=["pdf"])
+
+if uploaded_file is not None:
+    with st.spinner("🔍 Membaca file PDF..."):
+        text = extract_text_from_pdf(uploaded_file)
+        if len(text) < 100:
+            st.error("PDF terlalu singkat atau tidak memiliki teks yang bisa dibaca.")
         else:
-            st.warning("⚠️ Tidak berhasil meringkas teks.")
+            st.success("✅ Teks berhasil diekstrak dari PDF.")
+            st.subheader("📘 Cuplikan Teks:")
+            st.write(text[:1000] + ("..." if len(text) > 1000 else ""))
 
-# ==============================================================
-# ✅ BAGIAN 7: Footer
-# ==============================================================
+            if st.button("🚀 Ringkas Sekarang"):
+                with st.spinner("🤖 AI sedang membuat ringkasan..."):
+                    summary = summarize_with_groq(text)
+                    if summary:
+                        st.success("✨ Ringkasan Berhasil Dibuat!")
+                        st.subheader("📝 Hasil Ringkasan:")
+                        st.write(summary)
+                        st.download_button("💾 Unduh Ringkasan", summary, file_name="ringkasan.pdf")
 
-st.markdown("---")
-st.caption("Dibuat dengan ❤️ menggunakan Streamlit + Groq API | 2025")
+else:
+    st.info("Silakan unggah file PDF terlebih dahulu untuk memulai.")
+
+# ============================================================
+# CATATAN
+# ============================================================
+st.markdown("""
+---
+💡 **Tips:**
+- Pastikan Anda sudah menambahkan API Key Groq di **Streamlit → Settings → Secrets**  
+  Dalam format TOML berikut:
