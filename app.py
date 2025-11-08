@@ -1,14 +1,13 @@
 import streamlit as st
-import sys
-import subprocess
 import os
+import subprocess
+import sys
 
 # ==============================================================
 # ✅ BAGIAN 1: Instalasi otomatis paket yang belum ada
 # ==============================================================
 
 def install_package(package):
-    """Instal paket Python jika belum terpasang."""
     try:
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
     except Exception as e:
@@ -24,24 +23,28 @@ except ModuleNotFoundError:
 try:
     from groq import Groq
 except ModuleNotFoundError:
-    st.warning("📦 Menginstal Groq SDK...")
+    st.warning("📦 Menginstal groq SDK...")
     install_package("groq")
     from groq import Groq
+
 
 # ==============================================================
 # ✅ BAGIAN 2: Konfigurasi halaman Streamlit
 # ==============================================================
 
-st.set_page_config(page_title="📄 PDF Summarizer AI (Groq)", layout="wide")
-st.title("📘 AI PDF Summarizer – Groq Edition")
-st.write("Unggah file PDF dan dapatkan ringkasannya secara otomatis menggunakan **Groq AI** 🚀")
+st.set_page_config(page_title="📄 AI PDF Summarizer (Groq)", layout="wide")
+st.title("📘 AI PDF Summarizer - Groq Model")
+st.write("Unggah file PDF dan dapatkan ringkasannya secara otomatis menggunakan AI dari **Groq** 🚀")
 
 # ==============================================================
-# ✅ BAGIAN 3: Input API key
+# ✅ BAGIAN 3: Ambil API Key dari Streamlit Secrets
 # ==============================================================
 
-st.sidebar.header("⚙️ Pengaturan")
-api_key = st.sidebar.text_input("Masukkan Groq API Key:", type="password")
+if "GROQ_API_KEY" in st.secrets:
+    api_key = st.secrets["GROQ_API_KEY"]
+else:
+    st.error("❌ API Key tidak ditemukan. Pastikan kamu sudah menambahkan `GROQ_API_KEY` di Secrets.")
+    st.stop()
 
 # ==============================================================
 # ✅ BAGIAN 4: Upload dan ekstraksi teks PDF
@@ -66,48 +69,34 @@ if uploaded_file is not None:
     text = extract_text_from_pdf(uploaded_file)
     if text.strip():
         st.success("✅ Berhasil mengekstrak teks dari PDF!")
-        with st.expander("Lihat isi teks PDF"):
-            st.text_area("📄 Isi PDF:", text, height=300)
+        with st.expander("📖 Lihat isi PDF"):
+            st.text_area("Isi Teks PDF:", text, height=300)
     else:
         st.warning("⚠️ Tidak ditemukan teks dalam PDF ini.")
 
 # ==============================================================
-# ✅ BAGIAN 5: Fungsi peringkasan dengan fallback
+# ✅ BAGIAN 5: Fungsi Peringkasan dengan Groq
 # ==============================================================
 
-def summarize_text(text, api_key=None):
-    """Meringkas teks menggunakan Groq API, atau fallback jika gagal."""
-    if not text.strip():
-        return "Tidak ada teks yang bisa diringkas."
-
-    if not api_key:
-        return simple_summarizer(text)
-
+def summarize_with_groq(text, api_key):
+    """Meringkas teks menggunakan API Groq."""
     try:
         client = Groq(api_key=api_key)
-        response = client.chat.completions.create(
-            model="mixtral-8x7b",  # Model unggulan Groq untuk tugas reasoning dan ringkasan
+
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",  # model cepat dari Groq
             messages=[
-                {"role": "system", "content": "Kamu adalah asisten AI yang ahli meringkas dokumen panjang."},
+                {"role": "system", "content": "Kamu adalah asisten AI yang ahli dalam meringkas dokumen panjang."},
                 {"role": "user", "content": f"Ringkas teks berikut dalam bahasa Indonesia:\n\n{text}"}
             ],
             temperature=0.3,
             max_tokens=500
         )
-        return response.choices[0].message.content.strip()
+        return completion.choices[0].message.content.strip()
 
     except Exception as e:
-        st.warning(f"⚠️ Terjadi kesalahan saat memanggil Groq API: {e}")
-        return simple_summarizer(text)
-
-def simple_summarizer(text):
-    """Fallback sederhana jika AI gagal."""
-    sentences = text.split(".")
-    if len(sentences) > 5:
-        summary = ". ".join(sentences[:5]) + "."
-    else:
-        summary = text
-    return f"(Fallback Lokal) Ringkasan sederhana:\n\n{summary.strip()}"
+        st.error(f"❌ Gagal meringkas dengan Groq API: {e}")
+        return None
 
 # ==============================================================
 # ✅ BAGIAN 6: Tombol Ringkas
@@ -119,18 +108,13 @@ if st.button("🧠 Ringkas PDF"):
     elif not text.strip():
         st.warning("⚠️ Tidak ada teks yang bisa diringkas.")
     else:
-        with st.spinner("⏳ AI sedang meringkas isi PDF..."):
-            summary = summarize_text(text, api_key)
-        st.subheader("📋 Hasil Ringkasan:")
-        st.write(summary)
-
-        # Tombol download hasil ringkasan
-        st.download_button(
-            label="💾 Unduh Ringkasan sebagai TXT",
-            data=summary,
-            file_name="ringkasan_groq.txt",
-            mime="text/plain"
-        )
+        with st.spinner("⏳ AI Groq sedang meringkas isi PDF..."):
+            summary = summarize_with_groq(text, api_key)
+        if summary:
+            st.subheader("📋 Hasil Ringkasan:")
+            st.write(summary)
+        else:
+            st.warning("⚠️ Tidak berhasil meringkas teks.")
 
 # ==============================================================
 # ✅ BAGIAN 7: Footer
